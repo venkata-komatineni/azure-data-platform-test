@@ -1,0 +1,15 @@
+{
+	"name": "adf-boots-platform-dev",
+	"properties": {
+		"trustModeClaimForMi": {
+			"value": "Disabled",
+			"editable": true
+		}
+	},
+	"location": "eastus",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "4636c917-3111-412b-a67c-6ebee2dfc4e1",
+		"tenantId": "a85cf13a-0516-46a7-9660-a40399b66d7e"
+	}
+}
