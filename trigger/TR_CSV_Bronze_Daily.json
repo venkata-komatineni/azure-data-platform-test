@@ -1,0 +1,35 @@
+{
+	"name": "TR_CSV_Bronze_Daily",
+	"properties": {
+		"annotations": [],
+		"runtimeState": "Started",
+		"pipelines": [
+			{
+				"pipelineReference": {
+					"referenceName": "PL_CSV_To_Bronze_Daily",
+					"type": "PipelineReference"
+				}
+			}
+		],
+		"type": "ScheduleTrigger",
+		"typeProperties": {
+			"recurrence": {
+				"frequency": "Week",
+				"interval": 1,
+				"startTime": "2026-08-08T15:39:00",
+				"timeZone": "GMT Standard Time",
+				"schedule": {
+					"minutes": [
+						42
+					],
+					"hours": [
+						16
+					],
+					"weekDays": [
+						"Saturday"
+					]
+				}
+			}
+		}
+	}
+}
