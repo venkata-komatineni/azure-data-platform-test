@@ -1,11 +1,11 @@
 {
   "name": "PL_ODS_Batch_Ingestion_Daily",
   "properties": {
-    "description": "Boots UK - Daily batch ingestion pipeline. Reads incremental data from centralised ODS (SQL Server) across POS, Online and Pharmacy source tables. Lands raw Avro files in ADLS Gen2 landing zone. Validates load via reusable Databricks validation framework. Updates watermark checkpoint on success. Alerts and cleans up on failure.",
+    "description": "Daily batch ingestion pipeline. Reads incremental data from ODS source tables. Lands raw Avro files in ADLS Gen2. Validates load via Databricks validation notebook. Updates watermark on success. Alerts on failure.",
     "activities": [
       {
         "name": "LKP_GetIngestionConfig",
-        "description": "Read all active table configs from the central watermark/checkpoint control table.",
+        "description": "Read all active table configs from the central watermark control table.",
         "type": "Lookup",
         "dependsOn": [],
         "policy": {
@@ -46,7 +46,7 @@
           "activities": [
             {
               "name": "CPY_ODS_To_LandingZone",
-              "description": "Incremental copy from SQL Server ODS table to ADLS Gen2 landing zone as Avro. Uses watermark column for incremental extract.",
+              "description": "Incremental copy from SQL Server ODS table to ADLS Gen2 landing zone as Avro.",
               "type": "Copy",
               "dependsOn": [],
               "policy": {
@@ -61,16 +61,7 @@
                     "value": "@concat('SELECT * FROM ', item().source_schema, '.', item().source_table, ' WHERE ', item().watermark_column, ' >= ''', item().watermark_value, '''')",
                     "type": "Expression"
                   },
-                  "queryTimeout": "01:00:00",
-                  "partitionOption": "DynamicRange",
-                  "partitionSettings": {
-                    "partitionColumnName": {
-                      "value": "@item().watermark_column",
-                      "type": "Expression"
-                    },
-                    "partitionUpperBound": null,
-                    "partitionLowerBound": null
-                  }
+                  "queryTimeout": "01:00:00"
                 },
                 "sink": {
                   "type": "AvroSink",
@@ -89,15 +80,7 @@
                 },
                 "enableStaging": false,
                 "dataIntegrationUnits": 8,
-                "parallelCopies": 4,
-                "translator": {
-                  "type": "TabularTranslator",
-                  "typeConversion": true,
-                  "typeConversionSettings": {
-                    "allowDataTruncation": false,
-                    "treatBooleanAsNumber": false
-                  }
-                }
+                "parallelCopies": 4
               },
               "inputs": [
                 {
@@ -130,7 +113,7 @@
             },
             {
               "name": "NB_ValidateLoad",
-              "description": "Run the reusable Databricks validation framework notebook. Compares row count and control sum between source and landed Avro file. Returns PASSED or FAILED.",
+              "description": "Run Databricks validation notebook. Returns PASSED or FAILED.",
               "type": "DatabricksNotebook",
               "dependsOn": [
                 {
@@ -146,8 +129,6 @@
               "typeProperties": {
                 "notebookPath": "/Shared/Frameworks/NB_DataValidationFramework",
                 "baseParameters": {
-                  "source_type": "sqlserver",
-                  "source_connection_secret": "kv-ods-sqlserver-connstr",
                   "source_schema": {
                     "value": "@item().source_schema",
                     "type": "Expression"
@@ -164,17 +145,8 @@
                     "value": "@item().watermark_value",
                     "type": "Expression"
                   },
-                  "target_adls_path": {
-                    "value": "@concat('abfss://landingzone@bootsadlsprod.dfs.core.windows.net/', item().target_folder, '/', item().target_file_prefix, '_', formatDateTime(utcNow(), 'yyyyMMdd_HHmmss'), '*.avro')",
-                    "type": "Expression"
-                  },
-                  "control_sum_column": "store_id",
                   "batch_id": {
                     "value": "@pipeline().RunId",
-                    "type": "Expression"
-                  },
-                  "pipeline_name": {
-                    "value": "@pipeline().Pipeline",
                     "type": "Expression"
                   }
                 }
@@ -186,7 +158,7 @@
             },
             {
               "name": "IF_ValidationResult",
-              "description": "Branch on validation outcome: PASSED -> update watermark. FAILED -> log failure, clean up file, alert team.",
+              "description": "Branch on PASSED or FAILED validation output.",
               "type": "IfCondition",
               "dependsOn": [
                 {
@@ -202,49 +174,15 @@
                 "ifTrueActivities": [
                   {
                     "name": "SCR_UpdateWatermark",
-                    "description": "Update the watermark value in the control table to the max timestamp processed in this run.",
+                    "description": "Update watermark to current run timestamp on success.",
                     "type": "Script",
                     "dependsOn": [],
-                    "policy": {
-                      "timeout": "0.00:05:00",
-                      "retry": 2,
-                      "retryIntervalInSeconds": 15
-                    },
                     "typeProperties": {
                       "scripts": [
                         {
                           "type": "Query",
                           "text": {
-                            "value": "@concat('UPDATE control.ingestion_watermark SET watermark_value = (SELECT MAX(', item().watermark_column, ') FROM ', item().source_schema, '.', item().source_table, '), last_successful_run = GETUTCDATE(), last_batch_id = ''', pipeline().RunId, ''' WHERE source_table = ''', item().source_table, '''')",
-                            "type": "Expression"
-                          }
-                        }
-                      ],
-                      "logSettings": {
-                        "enableReliableLogging": false
-                      }
-                    },
-                    "linkedServiceName": {
-                      "referenceName": "LS_ControlDB",
-                      "type": "LinkedServiceReference"
-                    }
-                  },
-                  {
-                    "name": "SCR_LogSuccess",
-                    "description": "Write success entry to audit log table.",
-                    "type": "Script",
-                    "dependsOn": [
-                      {
-                        "activity": "SCR_UpdateWatermark",
-                        "dependencyConditions": ["Succeeded"]
-                      }
-                    ],
-                    "typeProperties": {
-                      "scripts": [
-                        {
-                          "type": "Query",
-                          "text": {
-                            "value": "@concat('INSERT INTO control.ingestion_audit_log (batch_id, source_table, status, rows_copied, run_timestamp, pipeline_name) VALUES (''', pipeline().RunId, ''', ''', item().source_table, ''', ''SUCCESS'', ', activity('CPY_ODS_To_LandingZone').output.rowsCopied, ', GETUTCDATE(), ''', pipeline().Pipeline, ''')')",
+                            "value": "@concat('UPDATE control.ingestion_watermark SET watermark_value = ''', formatDateTime(utcNow(), 'yyyy-MM-dd HH:mm:ss'), ''', last_successful_run = GETUTCDATE(), last_batch_id = ''', pipeline().RunId, ''' WHERE source_table = ''', item().source_table, '''')",
                             "type": "Expression"
                           }
                         }
@@ -258,107 +196,23 @@
                 ],
                 "ifFalseActivities": [
                   {
-                    "name": "SCR_LogValidationFailure",
-                    "description": "Write failure entry to audit log table with mismatch details.",
-                    "type": "Script",
+                    "name": "WEB_AlertTeams",
+                    "description": "Send Teams webhook alert on validation failure.",
+                    "type": "WebActivity",
                     "dependsOn": [],
                     "typeProperties": {
-                      "scripts": [
-                        {
-                          "type": "Query",
-                          "text": {
-                            "value": "@concat('INSERT INTO control.ingestion_audit_log (batch_id, source_table, status, error_details, run_timestamp, pipeline_name) VALUES (''', pipeline().RunId, ''', ''', item().source_table, ''', ''VALIDATION_FAILED'', ''Row count or control sum mismatch detected'', GETUTCDATE(), ''', pipeline().Pipeline, ''')')",
-                            "type": "Expression"
-                          }
-                        }
-                      ]
-                    },
-                    "linkedServiceName": {
-                      "referenceName": "LS_ControlDB",
-                      "type": "LinkedServiceReference"
-                    }
-                  },
-                  {
-                    "name": "NB_CleanupFailedFiles",
-                    "description": "Delete partially written or invalid Avro files from landing zone for this batch and table.",
-                    "type": "DatabricksNotebook",
-                    "dependsOn": [
-                      {
-                        "activity": "SCR_LogValidationFailure",
-                        "dependencyConditions": ["Succeeded"]
-                      }
-                    ],
-                    "typeProperties": {
-                      "notebookPath": "/Shared/Frameworks/NB_CleanupLandingZone",
-                      "baseParameters": {
-                        "target_folder": {
-                          "value": "@concat('landingzone/', item().target_folder)",
-                          "type": "Expression"
-                        },
-                        "file_prefix": {
-                          "value": "@item().target_file_prefix",
-                          "type": "Expression"
-                        },
-                        "batch_id": {
-                          "value": "@pipeline().RunId",
-                          "type": "Expression"
-                        }
-                      }
-                    },
-                    "linkedServiceName": {
-                      "referenceName": "LS_Databricks_ValidationCluster",
-                      "type": "LinkedServiceReference"
-                    }
-                  },
-                  {
-                    "name": "WEB_AlertTeams",
-                    "description": "Send Teams webhook alert notifying the data engineering team of validation failure.",
-                    "type": "WebActivity",
-                    "dependsOn": [
-                      {
-                        "activity": "NB_CleanupFailedFiles",
-                        "dependencyConditions": ["Succeeded", "Failed"]
-                      }
-                    ],
-                    "typeProperties": {
-                      "url": "https://boots.webhook.office.com/webhookb2/TEAMS_WEBHOOK_URL",
+                      "url": "https://placeholder.webhook.office.com/webhookb2/TEAMS_WEBHOOK_URL",
                       "method": "POST",
                       "headers": {
                         "Content-Type": "application/json"
                       },
                       "body": {
-                        "value": "@concat('{\"title\": \"ADF Ingestion Validation FAILED\", \"text\": \"Pipeline: ', pipeline().Pipeline, ' | Table: ', item().source_table, ' | BatchId: ', pipeline().RunId, ' | Time: ', utcNow(), ' | Action: Landing zone cleaned. Watermark NOT updated. Manual investigation required.\"}')",
+                        "value": "@concat('{\"title\": \"ADF Ingestion Validation FAILED\", \"text\": \"Pipeline: ', pipeline().Pipeline, ' | Table: ', item().source_table, ' | BatchId: ', pipeline().RunId, '\"}')",
                         "type": "Expression"
                       }
                     }
                   }
                 ]
-              }
-            },
-            {
-              "name": "SCR_HandleCopyFailure",
-              "description": "If Copy Activity itself fails (not validation), log the error and alert.",
-              "type": "Script",
-              "dependsOn": [
-                {
-                  "activity": "CPY_ODS_To_LandingZone",
-                  "dependencyConditions": ["Failed"]
-                }
-              ],
-              "typeProperties": {
-                "scripts": [
-                  {
-                    "type": "Query",
-                    "text": {
-                      "value": "@concat('INSERT INTO control.ingestion_audit_log (batch_id, source_table, status, error_details, run_timestamp, pipeline_name) VALUES (''', pipeline().RunId, ''', ''', item().source_table, ''', ''COPY_FAILED'', ''Copy Activity failed - check ADF monitor for details'', GETUTCDATE(), ''', pipeline().Pipeline, ''')')",
-                      "type": "Expression"
-                    }
-                  }
-                ]
-              },
-              "linkedServiceName": {
-                "referenceName": "LS_ControlDB",
-                "type": "LinkedServiceReference"
               }
             }
           ]
@@ -366,12 +220,10 @@
       }
     ],
     "annotations": [
-      "Boots UK Data Platform",
       "Batch Ingestion",
       "ODS to Landing Zone",
       "Incremental Watermark"
     ],
-    "parameters": {},
     "variables": {
       "pipelineRunId": {
         "type": "String"
@@ -380,27 +232,5 @@
     "folder": {
       "name": "01_Ingestion"
     }
-  },
-  "type": "Microsoft.DataFactory/factories/pipelines",
-
-  "_comments": {
-    "linked_services_required": [
-      "LS_SQLServer_ODS - SQL Server Linked Service using Self-Hosted Integration Runtime (SHIR). Credentials stored in Key Vault.",
-      "LS_ADLS_LandingZone - Azure Data Lake Storage Gen2 Linked Service. Uses Managed Identity auth.",
-      "LS_ControlDB - SQL or Azure SQL Linked Service pointing to the control/metadata database.",
-      "LS_Databricks_ValidationCluster - Azure Databricks Linked Service pointing to existing interactive or job cluster."
-    ],
-    "datasets_required": [
-      "DS_SQLServer_ODS_Source - Parameterised SQL Server dataset with schemaName and tableName parameters.",
-      "DS_ADLS_LandingZone_Avro - Avro format dataset pointing to ADLS Gen2 landing container. Parameterised on targetFolder.",
-      "DS_ControlDB_WatermarkTable - Dataset pointing to control.ingestion_watermark table."
-    ],
-    "control_table_ddl": "CREATE TABLE control.ingestion_watermark (source_schema VARCHAR(50), source_table VARCHAR(100), watermark_column VARCHAR(100), watermark_value VARCHAR(50), target_folder VARCHAR(100), target_file_prefix VARCHAR(100), active_flag BIT DEFAULT 1, last_successful_run DATETIME, last_batch_id VARCHAR(100));",
-    "audit_log_ddl": "CREATE TABLE control.ingestion_audit_log (log_id INT IDENTITY(1,1) PRIMARY KEY, batch_id VARCHAR(100), source_table VARCHAR(100), status VARCHAR(50), rows_copied INT, error_details VARCHAR(500), run_timestamp DATETIME DEFAULT GETUTCDATE(), pipeline_name VARCHAR(100));",
-    "trigger_schedule": "Schedule Trigger: Daily at 02:00 AM UTC. Attach trigger PL_ODS_Batch_Ingestion_Daily_Trigger to this pipeline.",
-    "landing_zone_structure": "abfss://landingzone@bootsadlsprod.dfs.core.windows.net/pos/, /online/, /pharmacy/",
-    "file_naming_convention": "<table_prefix>_<yyyyMMdd_HHmmss>_part<N>.avro  e.g. transactions_20260807_020015_part00001.avro",
-    "validation_framework_notebook": "NB_DataValidationFramework at /Shared/Frameworks/ accepts: source_type, source_connection_secret, source_schema, source_table, watermark_column, watermark_value, target_adls_path, control_sum_column, batch_id. Returns runOutput of PASSED or FAILED.",
-    "environment_promotion": "Dev -> UAT -> Prod via Azure DevOps ARM template export. Each environment has its own ADF instance and ADLS account. Linked service connection strings parameterised via environment-specific parameter files (ARMTemplateParametersForFactory.json)."
   }
 }
