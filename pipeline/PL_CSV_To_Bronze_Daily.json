@@ -1,0 +1,92 @@
+{
+  "name": "PL_CSV_To_Bronze_Daily",
+  "properties": {
+    "description": "Daily ingestion pipeline. Reads transactions CSV from ADLS raw container, copies to bronze container in Parquet format.",
+    "activities": [
+      {
+        "name": "CPY_Transactions_To_Bronze",
+        "description": "Copy transactions CSV from raw landing zone to bronze container as Parquet.",
+        "type": "Copy",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.01:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30
+        },
+        "typeProperties": {
+          "source": {
+            "type": "DelimitedTextSource",
+            "storeSettings": {
+              "type": "AzureBlobFSReadSettings",
+              "recursive": false,
+              "enablePartitionDiscovery": false
+            },
+            "formatSettings": {
+              "type": "DelimitedTextReadSettings"
+            }
+          },
+          "sink": {
+            "type": "ParquetSink",
+            "storeSettings": {
+              "type": "AzureBlobFSWriteSettings"
+            },
+            "formatSettings": {
+              "type": "ParquetWriteSettings"
+            }
+          },
+          "enableStaging": false,
+          "translator": {
+            "type": "TabularTranslator",
+            "typeConversion": true,
+            "typeConversionSettings": {
+              "allowDataTruncation": false,
+              "treatBooleanAsNumber": false
+            }
+          }
+        },
+        "inputs": [
+          {
+            "referenceName": "DS_ADLS_Raw_CSV",
+            "type": "DatasetReference"
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "DS_ADLS_Bronze_Parquet",
+            "type": "DatasetReference"
+          }
+        ]
+      },
+      {
+        "name": "WEB_AlertOnFailure",
+        "description": "Send alert if copy fails.",
+        "type": "WebActivity",
+        "dependsOn": [
+          {
+            "activity": "CPY_Transactions_To_Bronze",
+            "dependencyConditions": ["Failed"]
+          }
+        ],
+        "typeProperties": {
+          "url": "https://placeholder.webhook.office.com/webhookb2/REPLACE_WITH_TEAMS_WEBHOOK",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": {
+            "value": "@concat('{\"title\": \"ADF Pipeline FAILED\", \"text\": \"Pipeline: ', pipeline().Pipeline, ' failed at ', utcNow(), '\"}')",
+            "type": "Expression"
+          }
+        }
+      }
+    ],
+    "annotations": [
+      "Batch Ingestion",
+      "CSV to Bronze",
+      "Parquet Output"
+    ],
+    "folder": {
+      "name": "01_Ingestion"
+    }
+  }
+}
