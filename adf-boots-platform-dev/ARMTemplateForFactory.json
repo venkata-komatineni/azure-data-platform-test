@@ -91,37 +91,6 @@
 								"parameters": {}
 							}
 						]
-					},
-					{
-						"name": "WEB_AlertOnFailure",
-						"description": "Send alert if copy fails.",
-						"type": "WebActivity",
-						"dependsOn": [
-							{
-								"activity": "CPY_Transactions_To_Bronze",
-								"dependencyConditions": [
-									"Succeeded"
-								]
-							}
-						],
-						"policy": {
-							"retry": 0,
-							"retryIntervalInSeconds": 30,
-							"secureOutput": false,
-							"secureInput": false
-						},
-						"userProperties": [],
-						"typeProperties": {
-							"method": "POST",
-							"headers": {
-								"Content-Type": "application/json"
-							},
-							"url": "https://placeholder.webhook.office.com/webhookb2/REPLACE_WITH_TEAMS_WEBHOOK",
-							"body": {
-								"value": "@concat('{\"title\": \"ADF Pipeline FAILED\", \"text\": \"Pipeline: ', pipeline().Pipeline, ' failed at ', utcNow(), '\"}')",
-								"type": "Expression"
-							}
-						}
 					}
 				],
 				"policy": {
@@ -304,27 +273,40 @@
 			"apiVersion": "2018-06-01",
 			"properties": {
 				"annotations": [],
-				"runtimeState": "Stopped",
-				"pipelines": [],
+				"runtimeState": "Started",
+				"pipelines": [
+					{
+						"pipelineReference": {
+							"referenceName": "PL_CSV_To_Bronze_Daily",
+							"type": "PipelineReference"
+						},
+						"parameters": {}
+					}
+				],
 				"type": "ScheduleTrigger",
 				"typeProperties": {
 					"recurrence": {
-						"frequency": "Day",
+						"frequency": "Week",
 						"interval": 1,
-						"startTime": "2026-08-08T15:30:00",
+						"startTime": "2026-08-08T15:39:00",
 						"timeZone": "GMT Standard Time",
 						"schedule": {
 							"minutes": [
-								32
+								42
 							],
 							"hours": [
-								15
+								16
+							],
+							"weekDays": [
+								"Saturday"
 							]
 						}
 					}
 				}
 			},
-			"dependsOn": []
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/pipelines/PL_CSV_To_Bronze_Daily')]"
+			]
 		}
 	]
 }
