@@ -2,7 +2,7 @@
 	"name": "TR_CSV_Bronze_Daily",
 	"properties": {
 		"annotations": [],
-		"runtimeState": "Stopped",
+		"runtimeState": "Started",
 		"pipelines": [],
 		"type": "ScheduleTrigger",
 		"typeProperties": {
@@ -13,7 +13,7 @@
 				"timeZone": "GMT Standard Time",
 				"schedule": {
 					"minutes": [
-						32
+						38
 					],
 					"hours": [
 						15
