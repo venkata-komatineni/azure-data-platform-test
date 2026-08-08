@@ -57,37 +57,6 @@
 						"type": "DatasetReference"
 					}
 				]
-			},
-			{
-				"name": "WEB_AlertOnFailure",
-				"description": "Send alert if copy fails.",
-				"type": "WebActivity",
-				"dependsOn": [
-					{
-						"activity": "CPY_Transactions_To_Bronze",
-						"dependencyConditions": [
-							"Succeeded"
-						]
-					}
-				],
-				"policy": {
-					"retry": 0,
-					"retryIntervalInSeconds": 30,
-					"secureOutput": false,
-					"secureInput": false
-				},
-				"userProperties": [],
-				"typeProperties": {
-					"method": "POST",
-					"headers": {
-						"Content-Type": "application/json"
-					},
-					"url": "https://placeholder.webhook.office.com/webhookb2/REPLACE_WITH_TEAMS_WEBHOOK",
-					"body": {
-						"value": "@concat('{\"title\": \"ADF Pipeline FAILED\", \"text\": \"Pipeline: ', pipeline().Pipeline, ' failed at ', utcNow(), '\"}')",
-						"type": "Expression"
-					}
-				}
 			}
 		],
 		"folder": {
